@@ -18,6 +18,8 @@ const preprocess = require("./print-preprocess");
 const {
   hasFlowShorthandAnnotationComment,
   hasComment,
+  // [prettierx]: for --space-in-parens option support
+  hasAddedLine,
   CommentCheckFlags,
   isTheOnlyJsxElementInMarkdown,
   isBlockComment,
@@ -28,6 +30,8 @@ const {
   hasIgnoreComment,
   isCallExpression,
   isMemberExpression,
+  // [prettierx]: for --space-in-parens option support
+  startsWithSpace,
 } = require("./utils");
 const { locStart, locEnd } = require("./loc");
 
@@ -117,7 +121,17 @@ function genericPrint(path, options, print, args) {
     return args && args.needsSemi ? [";", printed] : printed;
   }
 
-  const parts = [args && args.needsSemi ? ";(" : "(", printed];
+  // [prettierx] --space-in-parens option support (...)
+  const insideSpace = options.spaceInParens ? " " : "";
+
+  const addLeadingSpace = !startsWithSpace(printed);
+  const addTrailingSpace = !hasAddedLine(printed);
+
+  const parts = [
+    args && args.needsSemi ? ";(" : "(",
+    addLeadingSpace ? insideSpace : "",
+    printed,
+  ];
 
   if (hasFlowShorthandAnnotationComment(node)) {
     const [comment] = node.trailingComments;
@@ -125,7 +139,8 @@ function genericPrint(path, options, print, args) {
     comment.printed = true;
   }
 
-  parts.push(")");
+  // [prettierx] --space-in-parens option support (...)
+  parts.push(addTrailingSpace ? insideSpace : "", ")");
 
   return parts;
 }
@@ -133,6 +148,10 @@ function genericPrint(path, options, print, args) {
 function printPathNoParens(path, options, print, args) {
   const node = path.getValue();
   const semi = options.semi ? ";" : "";
+
+  // [prettierx] --space-in-parens option support (...)
+  const insideSpace = options.spaceInParens ? " " : "";
+  const innerLineBreak = options.spaceInParens ? line : softline;
 
   if (!node) {
     return "";
@@ -205,19 +224,22 @@ function printPathNoParens(path, options, print, args) {
         print("expression"),
         isTheOnlyJsxElementInMarkdown(options, path) ? "" : semi,
       ];
+    // prettierx: --space-in-parens option support (...)
     // Babel non-standard node. Used for Closure-style type casts. See postprocess.js.
     case "ParenthesizedExpression": {
       const shouldHug =
         !hasComment(node.expression) &&
         (node.expression.type === "ObjectExpression" ||
           node.expression.type === "ArrayExpression");
+      // [prettierx] --space-in-parens option support (...)
       if (shouldHug) {
-        return ["(", print("expression"), ")"];
+        return ["(", insideSpace, print("expression"), insideSpace, ")"];
       }
       return group([
         "(",
-        indent([softline, print("expression")]),
-        softline,
+        // [prettierx] --space-in-parens option support (...)
+        indent([innerLineBreak, print("expression")]),
+        innerLineBreak,
         ")",
       ]);
     }
@@ -272,6 +294,10 @@ function printPathNoParens(path, options, print, args) {
       parts.push("yield");
 
       if (node.delegate) {
+        // [prettierx] --yield-star-spacing option support (...)
+        if (options.yieldStarSpacing) {
+          parts.push(" ");
+        }
         parts.push("*");
       }
       if (node.argument) {
@@ -386,7 +412,18 @@ function printPathNoParens(path, options, print, args) {
     case "UnaryExpression":
       parts.push(node.operator);
 
-      if (/[a-z]$/.test(node.operator)) {
+      // [prettierx] spaceUnaryOps option support (...)
+      if (
+        /[a-z]$/.test(node.operator) ||
+        (options.spaceUnaryOps &&
+          // [prettierx] no space between `!!`
+          !(
+            node.operator === "!" &&
+            node.argument &&
+            node.argument.type === "UnaryExpression" &&
+            node.argument.operator === "!"
+          ))
+      ) {
         parts.push(" ");
       }
 
@@ -453,9 +490,14 @@ function printPathNoParens(path, options, print, args) {
       return group(parts);
     }
     case "WithStatement":
+      // [prettierx] --space-in-parens option support (...)
       return group([
         "with (",
+        // [prettierx] --space-in-parens option support (...)
+        insideSpace,
         print("object"),
+        // [prettierx] --space-in-parens option support (...)
+        insideSpace,
         ")",
         adjustClause(node.body, print("body")),
       ]);
@@ -463,7 +505,8 @@ function printPathNoParens(path, options, print, args) {
       const con = adjustClause(node.consequent, print("consequent"));
       const opening = group([
         "if (",
-        group([indent([softline, print("test")]), softline]),
+        // [prettierx] --space-in-parens option support (...)
+        group([indent([innerLineBreak, print("test")]), innerLineBreak]),
         ")",
         con,
       ]);
@@ -471,19 +514,25 @@ function printPathNoParens(path, options, print, args) {
       parts.push(opening);
 
       if (node.alternate) {
+        // [prettierx] --break-before-else option support (...)
         const commentOnOwnLine =
           hasComment(
             node.consequent,
-            CommentCheckFlags.Trailing | CommentCheckFlags.Line
+            options.breakBeforeElse
+              ? CommentCheckFlags.Trailing
+              : CommentCheckFlags.Trailing | CommentCheckFlags.Line
           ) || needsHardlineAfterDanglingComment(node);
+        // [prettierx] --break-before-else option support (...)
         const elseOnSameLine =
-          node.consequent.type === "BlockStatement" && !commentOnOwnLine;
+          node.consequent.type === "BlockStatement" &&
+          !commentOnOwnLine &&
+          !options.breakBeforeElse;
         parts.push(elseOnSameLine ? " " : hardline);
 
         if (hasComment(node, CommentCheckFlags.Dangling)) {
           parts.push(
             printDanglingComments(path, options, true),
-            commentOnOwnLine ? hardline : " "
+            commentOnOwnLine || options.breakBeforeElse ? hardline : " "
           );
         }
 
@@ -521,10 +570,12 @@ function printPathNoParens(path, options, print, args) {
       return [
         printedComments,
         group([
+          // [prettierx] with --space-in-parens option support (...)
           "for (",
           group([
             indent([
-              softline,
+              // [prettierx] --space-in-parens option support (...)
+              innerLineBreak,
               print("init"),
               ";",
               line,
@@ -533,7 +584,8 @@ function printPathNoParens(path, options, print, args) {
               line,
               print("update"),
             ]),
-            softline,
+            // [prettierx] --space-in-parens option support (...)
+            innerLineBreak,
           ]),
           ")",
           body,
@@ -543,28 +595,39 @@ function printPathNoParens(path, options, print, args) {
     case "WhileStatement":
       return group([
         "while (",
-        group([indent([softline, print("test")]), softline]),
+        // [prettierx] --space-in-parens option support (...)
+        group([indent([innerLineBreak, print("test")]), innerLineBreak]),
         ")",
         adjustClause(node.body, print("body")),
       ]);
     case "ForInStatement":
+      // [prettierx] --space-in-parens option support (...)
       return group([
         "for (",
+        // [prettierx] --space-in-parens option support (...)
+        insideSpace,
         print("left"),
         " in ",
         print("right"),
+        // [prettierx] --space-in-parens option support (...)
+        insideSpace,
         ")",
         adjustClause(node.body, print("body")),
       ]);
 
     case "ForOfStatement":
+      // [prettierx] --space-in-parens option support (...)
       return group([
         "for",
         node.await ? " await" : "",
         " (",
+        // [prettierx] --space-in-parens option support (...)
+        insideSpace,
         print("left"),
         " of ",
         print("right"),
+        // [prettierx] --space-in-parens option support (...)
+        insideSpace,
         ")",
         adjustClause(node.body, print("body")),
       ]);
@@ -581,7 +644,8 @@ function printPathNoParens(path, options, print, args) {
       }
       parts.push(
         "while (",
-        group([indent([softline, print("test")]), softline]),
+        // [prettierx] --space-in-parens option support (...)
+        group([indent([innerLineBreak, print("test")]), innerLineBreak]),
         ")",
         semi
       );
@@ -640,9 +704,10 @@ function printPathNoParens(path, options, print, args) {
 
         return [
           "catch ",
+          // [prettierx] --space-in-parens option support (...)
           parameterHasComments
-            ? ["(", indent([softline, param]), softline, ") "]
-            : ["(", param, ") "],
+            ? ["(", indent([innerLineBreak, param]), innerLineBreak, ") "]
+            : ["(", insideSpace, param, insideSpace, ") "],
           print("body"),
         ];
       }
@@ -651,10 +716,12 @@ function printPathNoParens(path, options, print, args) {
     // Note: ignoring n.lexical because it has no printing consequences.
     case "SwitchStatement":
       return [
+        // [prettierx] --space-in-parens option support (...)
         group([
           "switch (",
-          indent([softline, print("discriminant")]),
-          softline,
+          // [prettierx] --space-in-parens option support (...)
+          indent([innerLineBreak, print("discriminant")]),
+          innerLineBreak,
           ")",
         ]),
         " {",

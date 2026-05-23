@@ -170,6 +170,8 @@ function handleIfStatementComments({
   enclosingNode,
   followingNode,
   text,
+  // [prettierx] support --break-before-else option
+  options,
 }) {
   if (
     !enclosingNode ||
@@ -201,7 +203,8 @@ function handleIfStatementComments({
     precedingNode === enclosingNode.consequent &&
     followingNode === enclosingNode.alternate
   ) {
-    if (precedingNode.type === "BlockStatement") {
+    // [prettierx] --break-before-else option support
+    if (precedingNode.type === "BlockStatement" && !options.breakBeforeElse) {
       addTrailingComment(precedingNode, comment);
     } else {
       addDanglingComment(enclosingNode, comment);
@@ -910,6 +913,8 @@ function getCommentChildNodes(node, options) {
   //     }
   if (
     (options.parser === "typescript" ||
+      // [prettierx] support __typescript_estree parser option for testing
+      options.parser === "__typescript_estree" ||
       options.parser === "flow" ||
       options.parser === "espree" ||
       options.parser === "meriyah" ||

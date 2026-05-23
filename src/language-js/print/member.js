@@ -1,7 +1,8 @@
 "use strict";
 
 const {
-  builders: { softline, group, indent, label },
+  // [prettierx] --computed-property-spacing option support
+  builders: { softline, line, group, indent, label },
 } = require("../../document");
 const {
   isNumericLiteral,
@@ -57,15 +58,37 @@ function printMemberLookup(path, options, print) {
   const node = path.getValue();
   const optional = printOptionalToken(path);
 
+  // [prettierx] --computed-property-spacing option support
+  const computedPropertySpace = options.computedPropertySpacing ? " " : "";
+  const computedPropertyLine = options.computedPropertySpacing
+    ? line
+    : softline;
+
   if (!node.computed) {
     return [optional, ".", property];
   }
 
   if (!node.property || isNumericLiteral(node.property)) {
-    return [optional, "[", property, "]"];
+    // [prettierx] --computed-property-spacing option support
+    return [
+      optional,
+      "[",
+      computedPropertySpace,
+      property,
+      computedPropertySpace,
+      "]",
+    ];
   }
 
-  return group([optional, "[", indent([softline, property]), softline, "]"]);
+  // [prettierx] --computed-property-spacing option support
+  return group([
+    optional,
+    "[",
+    // [prettierx] --computed-property-spacing option support
+    indent([computedPropertyLine, property]),
+    computedPropertyLine,
+    "]",
+  ]);
 }
 
 module.exports = { printMemberExpression, printMemberLookup };

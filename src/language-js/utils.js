@@ -668,6 +668,57 @@ function hasLeadingOwnLineComment(text, node) {
   );
 }
 
+// [prettierx] for --space-in-parens option support (...)
+function startsWithSpace(arg) {
+  const getFirstItem = (item) => {
+    if (!item) {
+      return;
+    }
+
+    if (Array.isArray(item)) {
+      if (item.length > 0) {
+        return getFirstItem(item[0]);
+      }
+      return;
+    }
+
+    if (item.type === "group" || item.type === "indent") {
+      return getFirstItem(item.contents);
+    }
+
+    return item;
+  };
+
+  const firstItem = getFirstItem(arg);
+
+  return (
+    firstItem &&
+    (firstItem === " " || (firstItem.type === "line" && !firstItem.soft))
+  );
+}
+
+// [prettierx] for --space-in-parens option support (...)
+function hasAddedLine(arg) {
+  if (Array.isArray(arg)) {
+    if (arg.length > 0) {
+      return hasAddedLine(arg[0]);
+    }
+    return false;
+  }
+
+  switch (arg.type) {
+    case "concat":
+      if (arg.parts.length > 0) {
+        return hasAddedLine(getLast(arg.parts));
+      }
+      return false;
+    case "group":
+      return arg.addedLine;
+    default:
+      return false;
+  }
+}
+
 // Note: Quoting/unquoting numbers in TypeScript is not safe.
 //
 // let a = { 1: 1, 2: 2 }
@@ -700,10 +751,13 @@ function isStringPropSafeToUnquote(node, options) {
     isStringLiteral(node.key) &&
     rawText(node.key).slice(1, -1) === node.key.value &&
     ((isIdentifierName(node.key.value) &&
+      // [prettierx] support __typescript_estree parser option for testing
       // With `--strictPropertyInitialization`, TS treats properties with quoted names differently than unquoted ones.
       // See https://github.com/microsoft/TypeScript/pull/20075
       !(
-        (options.parser === "typescript" || options.parser === "babel-ts") &&
+        (options.parser === "typescript" ||
+          options.parser === "babel-ts" ||
+          options.parser === "__typescript_estree") &&
         node.type === "ClassProperty"
       )) ||
       (isSimpleNumber(node.key.value) &&
@@ -1315,6 +1369,8 @@ module.exports = {
   getLeftSidePathName,
   getParentExportDeclaration,
   getTypeScriptMappedTypeModifier,
+  // [prettierx]: for --space-in-parens support
+  hasAddedLine,
   hasFlowAnnotationComment,
   hasFlowShorthandAnnotationComment,
   hasLeadingOwnLineComment,
@@ -1364,6 +1420,8 @@ module.exports = {
   isBitwiseOperator,
   shouldFlatten,
   startsWithNoLookaheadToken,
+  // [prettierx]: for --space-in-parens support
+  startsWithSpace,
   getPrecedence,
   hasComment,
   getComments,

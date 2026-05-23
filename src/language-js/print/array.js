@@ -92,12 +92,16 @@ function printArray(path, options, print) {
       ? ifBreak(",", "", { groupId })
       : ifBreak(",");
 
+    // [prettierx] --array-bracket-spacing option support (...)
     parts.push(
       group(
+        // [prettierx] --array-bracket-spacing option support (...)
         [
           openBracket,
+          // [prettierx] --array-bracket-spacing option support (...)
           indent([
-            softline,
+            // [prettierx] --array-bracket-spacing option support (...)
+            options.arrayBracketSpacing ? line : softline,
             shouldUseConciseFormatting
               ? printArrayItemsConcisely(path, options, print, trailingComma)
               : [
@@ -106,7 +110,8 @@ function printArray(path, options, print) {
                 ],
             printDanglingComments(path, options, /* sameIndent */ true),
           ]),
-          softline,
+          // [prettierx] --array-bracket-spacing option support (...)
+          options.arrayBracketSpacing ? line : softline,
           closeBracket,
         ],
         { shouldBreak, id: groupId }

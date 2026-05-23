@@ -41,6 +41,9 @@ function printBinaryishExpression(path, options, print) {
       parent.type === "SwitchStatement" ||
       parent.type === "DoWhileStatement");
 
+  // [prettierx] --space-in-parens option support (...)
+  const innerLineBreak = options.spaceInParens ? line : softline;
+
   const parts = printBinaryishExpressions(
     path,
     print,
@@ -63,6 +66,9 @@ function printBinaryishExpression(path, options, print) {
     return parts;
   }
 
+  // [prettierx] --space-in-parens option support
+  // (...)
+  //
   // Break between the parens in
   // unaries or in a member or specific call expression, i.e.
   //
@@ -76,7 +82,10 @@ function printBinaryishExpression(path, options, print) {
     parent.type === "UnaryExpression" ||
     (isMemberExpression(parent) && !parent.computed)
   ) {
-    return group([indent([softline, ...parts]), softline]);
+    // [prettierx] --space-in-parens option support (...)
+    return group([indent([innerLineBreak, ...parts]), innerLineBreak], {
+      addedLine: options.spaceInParens,
+    });
   }
 
   // Avoid indenting sub-expressions in some cases where the first sub-expression is already

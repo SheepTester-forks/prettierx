@@ -25,6 +25,7 @@ const {
   isCallExpression,
   isStringLiteral,
   isBinaryish,
+  hasAddedLine, // [prettierx] for --template-curly-spacing option support (...)
   hasComment,
   CommentCheckFlags,
   hasNodeIgnoreComment,
@@ -498,6 +499,10 @@ function printJsxExpressionContainer(path, options, print) {
   const node = path.getValue();
   const parent = path.getParentNode(0);
 
+  // [prettierx] --template-curly-spacing option support (...)
+  const templateCurlySpace = options.templateCurlySpacing ? " " : "";
+  const templateCurlyLine = options.templateCurlySpacing ? line : softline;
+
   const shouldInline =
     node.expression.type === "JSXEmptyExpression" ||
     (!hasComment(node.expression) &&
@@ -514,13 +519,27 @@ function printJsxExpressionContainer(path, options, print) {
             isBinaryish(node.expression)))));
 
   if (shouldInline) {
-    return group(["{", print("expression"), lineSuffixBoundary, "}"]);
+    // [prettierx] --template-curly-spacing option support (...)
+    const printed = print("expression");
+
+    return group([
+      "{",
+      // [prettierx] --template-curly-spacing option support (...)
+      templateCurlySpace,
+      // [prettierx] --template-curly-spacing option support (...)
+      printed,
+      lineSuffixBoundary,
+      // [prettierx] --template-curly-spacing option support (...)
+      hasAddedLine(printed) ? "" : templateCurlySpace,
+      "}",
+    ]);
   }
 
   return group([
     "{",
-    indent([softline, print("expression")]),
-    softline,
+    // [prettierx] --template-curly-spacing option support (...)
+    indent([templateCurlyLine, print("expression")]),
+    templateCurlyLine,
     lineSuffixBoundary,
     "}",
   ]);
@@ -676,6 +695,11 @@ function printJsxEmptyExpression(path, options /*, print*/) {
 // `JSXSpreadAttribute` and `JSXSpreadChild`
 function printJsxSpreadAttribute(path, options, print) {
   const node = path.getValue();
+
+  // [prettierx] --template-curly-spacing option support (...)
+  const templateCurlySpace = options.templateCurlySpacing ? " " : "";
+  const templateCurlyLine = options.templateCurlySpacing ? line : softline;
+
   return [
     "{",
     path.call(
@@ -683,11 +707,14 @@ function printJsxSpreadAttribute(path, options, print) {
         const printed = ["...", print()];
         const node = p.getValue();
         if (!hasComment(node) || !willPrintOwnComments(p)) {
-          return printed;
+          // [prettierx] --template-curly-spacing option support (...)
+          return [templateCurlySpace, ...printed, templateCurlySpace];
         }
+        // [prettierx] with --template-curly-spacing option support (...)
         return [
-          indent([softline, printComments(p, printed, options)]),
-          softline,
+          // [prettierx] with --template-curly-spacing option support (...)
+          indent([templateCurlyLine, printComments(p, printed, options)]),
+          templateCurlyLine,
         ];
       },
       node.type === "JSXSpreadAttribute" ? "argument" : "expression"

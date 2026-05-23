@@ -4,6 +4,8 @@ const { printDanglingComments } = require("../../main/comments");
 const { getLast, getPenultimate } = require("../../common/util");
 const {
   getFunctionParameters,
+  // [prettierx] --space-in-parens option support (...)
+  hasAddedLine,
   hasComment,
   CommentCheckFlags,
   isFunctionCompositionArgs,
@@ -39,6 +41,10 @@ function printCallArguments(path, options, print) {
   const node = path.getValue();
   const isDynamicImport = node.type === "ImportExpression";
 
+  // [prettierx] for --space-in-parens option support (...)
+  const insideSpace = options.spaceInParens ? " " : "";
+  const innerLineBreak = options.spaceInParens ? line : softline;
+
   const args = getCallArguments(node);
   if (args.length === 0) {
     return [
@@ -50,7 +56,16 @@ function printCallArguments(path, options, print) {
 
   // useEffect(() => { ... }, [foo, bar, baz])
   if (isReactHookCallWithDepsArray(args)) {
-    return ["(", print(["arguments", 0]), ", ", print(["arguments", 1]), ")"];
+    // [prettierx] with --space-in-parens option support (...)
+    return [
+      "(",
+      insideSpace,
+      print(["arguments", 0]),
+      ", ",
+      print(["arguments", 1]),
+      insideSpace,
+      ")",
+    ];
   }
 
   let anyArgEmptyLine = false;
@@ -84,9 +99,18 @@ function printCallArguments(path, options, print) {
       ? ","
       : "";
 
-  function allArgsBrokenOut() {
+  // [prettierx] with lastArgAddedLine arg for --space-in-parens option support
+  function allArgsBrokenOut(lastArgAddedLine) {
     return group(
-      ["(", indent([line, ...printedArguments]), maybeTrailingComma, line, ")"],
+      [
+        "(",
+        // [prettierx] keep break here, regardless of --space-in-parens option
+        indent([line, ...printedArguments]),
+        maybeTrailingComma,
+        // [prettierx] keep break here, unless lastArgAddedLine is true
+        lastArgAddedLine ? "" : line,
+        ")",
+      ],
       { shouldBreak: true }
     );
   }
@@ -99,6 +123,7 @@ function printCallArguments(path, options, print) {
     return allArgsBrokenOut();
   }
 
+  // [prettierx] with --space-in-parens option support below (...)
   const shouldGroupFirst = shouldGroupFirstArg(args);
   const shouldGroupLast = shouldGroupLastArg(args, options);
   if (shouldGroupFirst || shouldGroupLast) {
@@ -112,6 +137,9 @@ function printCallArguments(path, options, print) {
 
     // We want to print the last argument with a special flag
     let printedExpanded = [];
+
+    // [prettierx] keep for --space-in-parens option support (...)
+    let lastArgAddedLine = false;
 
     try {
       path.try(() => {
@@ -128,6 +156,14 @@ function printCallArguments(path, options, print) {
             ];
           }
           if (shouldGroupLast && i === lastArgIndex) {
+            // [prettierx] with --space-in-parens option support (...)
+
+            // [prettierx] keep for --space-in-parens option support (...)
+            const printedLastArg = print(argPath, { expandLastArg: true });
+
+            // [prettierx] with --space-in-parens option support (...)
+            lastArgAddedLine = hasAddedLine(printedLastArg);
+
             printedExpanded = [
               ...printedArguments.slice(0, -1),
               print([], { expandLastArg: true }),
@@ -145,31 +181,51 @@ function printCallArguments(path, options, print) {
 
     return [
       printedArguments.some(willBreak) ? breakParent : "",
+      // [prettierx] with --space-in-parens option support (...)
       conditionalGroup([
-        ["(", ...printedExpanded, ")"],
+        [
+          "(",
+          // [prettierx] --space-in-parens option support (...)
+          insideSpace,
+          ...printedExpanded,
+          // [prettierx] --space-in-parens option support (...)
+          lastArgAddedLine ? "" : insideSpace,
+          ")",
+        ],
         shouldGroupFirst
           ? [
               "(",
+              // [prettierx] --space-in-parens option support (...)
+              insideSpace,
               group(printedExpanded[0], { shouldBreak: true }),
               ...printedExpanded.slice(1),
+              // [prettierx] --space-in-parens option support (...)
+              insideSpace,
               ")",
             ]
           : [
               "(",
+              // [prettierx] --space-in-parens option support (...)
+              insideSpace,
               ...printedArguments.slice(0, -1),
               group(getLast(printedExpanded), { shouldBreak: true }),
+              // [prettierx] --space-in-parens option support (...)
+              lastArgAddedLine ? "" : insideSpace,
               ")",
             ],
-        allArgsBrokenOut(),
+        allArgsBrokenOut(lastArgAddedLine),
       ]),
     ];
   }
 
+  // [prettierx] with --space-in-parens option support (...)
   const contents = [
     "(",
-    indent([softline, ...printedArguments]),
+    // [prettierx] --space-in-parens option support (...)
+    indent([innerLineBreak, ...printedArguments]),
     ifBreak(maybeTrailingComma),
-    softline,
+    // [prettierx] --space-in-parens option support (...)
+    innerLineBreak,
     ")",
   ];
   if (isLongCurriedCallExpression(path)) {

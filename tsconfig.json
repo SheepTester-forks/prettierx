@@ -43,7 +43,8 @@
     "docs/",
     "scripts/",
     "tests/",
-    "website/",
+    // [prettierx merge update from prettier@2.3.x ...]
+    "x-unsupported/website/",
     "types/"
   ]
 }

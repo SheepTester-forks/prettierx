@@ -38,9 +38,7 @@ const {
   insideURLFunctionInImportAtRuleNode,
   isKeyframeAtRuleKeywords,
   isWideKeywords,
-  isSCSS,
   isLastNode,
-  isLessParser,
   isSCSSControlDirectiveNode,
   isDetachedRulesetDeclarationNode,
   isRelationalOperatorNode,
@@ -123,7 +121,9 @@ function genericPrint(path, options, print) {
               node.selector.type === "selector-unknown" &&
               lastLineHasInlineComment(node.selector.value)
                 ? line
-                : " ",
+                : node.selector
+                ? " "
+                : "",
               "{",
               node.nodes.length > 0
                 ? indent([hardline, printNodeSequence(path, options, print)])
@@ -141,6 +141,8 @@ function genericPrint(path, options, print) {
       const { between: rawBetween } = node.raws;
       const trimmedBetween = rawBetween.trim();
       const isColon = trimmedBetween === ":";
+      const isValueAllSpace =
+        typeof node.value === "string" && /^ *$/.test(node.value);
 
       let value = hasComposesNode(node)
         ? removeLines(print("value"))
@@ -155,8 +157,8 @@ function genericPrint(path, options, print) {
         insideICSSRuleNode(path) ? node.prop : maybeToLowerCase(node.prop),
         trimmedBetween.startsWith("//") ? " " : "",
         trimmedBetween,
-        node.extend ? "" : " ",
-        isLessParser(options) && node.extend && node.selector
+        node.extend || isValueAllSpace ? "" : " ",
+        options.parser === "less" && node.extend && node.selector
           ? ["extend(", print("selector"), ")"]
           : "",
         value,
@@ -198,7 +200,7 @@ function genericPrint(path, options, print) {
         !parentNode.raws.semicolon &&
         options.originalText[locEnd(node) - 1] !== ";";
 
-      if (isLessParser(options)) {
+      if (options.parser === "less") {
         if (node.mixin) {
           return [
             print("selector"),
@@ -237,6 +239,11 @@ function genericPrint(path, options, print) {
           ];
         }
       }
+      const isImportUnknownValueEndsWithSemiColon =
+        node.name === "import" &&
+        node.params &&
+        node.params.type === "value-unknown" &&
+        node.params.value.endsWith(";");
 
       return [
         "@",
@@ -266,21 +273,24 @@ function genericPrint(path, options, print) {
           : "",
         node.selector ? indent([" ", print("selector")]) : "",
         node.value
-          ? group([
-              " ",
-              print("value"),
-              isSCSSControlDirectiveNode(node)
-                ? hasParensAroundNode(node)
-                  ? " "
-                  : line
-                : "",
-            ])
+          ? group(
+              // [prettierx merge update from prettier@2.3.2 ...]
+              [
+                " ",
+                path.call(print, "value"),
+                isSCSSControlDirectiveNode(node, options)
+                  ? hasParensAroundNode(node)
+                    ? " "
+                    : line
+                  : "",
+              ]
+            )
           : node.name === "else"
           ? " "
           : "",
         node.nodes
           ? [
-              isSCSSControlDirectiveNode(node)
+              isSCSSControlDirectiveNode(node, options)
                 ? ""
                 : (node.selector &&
                     !node.selector.nodes &&
@@ -299,7 +309,8 @@ function genericPrint(path, options, print) {
               softline,
               "}",
             ]
-          : isTemplatePlaceholderNodeWithoutSemiColon
+          : isTemplatePlaceholderNodeWithoutSemiColon ||
+            isImportUnknownValueEndsWithSemiColon
           ? ""
           : ";",
       ];
@@ -327,10 +338,20 @@ function genericPrint(path, options, print) {
       return adjustNumbers(adjustStrings(node.value, options));
     }
     case "media-feature-expression": {
+      // prettierx: cssParenSpacing option support (...)
+      const parenSpace = options.cssParenSpacing ? " " : "";
       if (!node.nodes) {
         return node.value;
       }
-      return ["(", ...path.map(print, "nodes"), ")"];
+      // [prettierx merge update from prettier@2.3.2] cssParenSpacing option support (...)
+      return [
+        // [prettierx merge update from prettier@2.3.2] (...)
+        "(",
+        parenSpace,
+        ...path.map(print, "nodes"),
+        parenSpace,
+        ")",
+      ];
     }
     case "media-feature": {
       return maybeToLowerCase(
@@ -455,10 +476,20 @@ function genericPrint(path, options, print) {
       ];
     }
     case "selector-pseudo": {
+      // prettierx: cssParenSpacing option support (...)
+      const parenSpace = options.cssParenSpacing ? " " : "";
       return [
         maybeToLowerCase(node.value),
+        // [prettierx merge update from prettier@2.3.2 ...]
         isNonEmptyArray(node.nodes)
-          ? ["(", join(", ", path.map(print, "nodes")), ")"]
+          ? [
+              // prettierx: cssParenSpacing option support (...)
+              "(",
+              parenSpace,
+              join(", ", path.map(print, "nodes")),
+              parenSpace,
+              ")",
+            ]
           : "",
       ];
     }
@@ -521,7 +552,8 @@ function genericPrint(path, options, print) {
           declAncestorProp.startsWith("grid-template"));
       const atRuleAncestorNode = getAncestorNode(path, "css-atrule");
       const isControlDirective =
-        atRuleAncestorNode && isSCSSControlDirectiveNode(atRuleAncestorNode);
+        atRuleAncestorNode &&
+        isSCSSControlDirectiveNode(atRuleAncestorNode, options);
       const hasInlineComment = node.groups.some((node) =>
         isInlineValueCommentNode(node)
       );
@@ -823,6 +855,10 @@ function genericPrint(path, options, print) {
     case "value-paren_group": {
       const parentNode = path.getParentNode();
 
+      // prettierx: cssParenSpacing option support (...)
+      const parenSpace = options.cssParenSpacing ? " " : "";
+      const parenLine = options.cssParenSpacing ? line : softline;
+
       if (
         parentNode &&
         isURLFunctionNode(parentNode) &&
@@ -834,9 +870,10 @@ function genericPrint(path, options, print) {
             node.groups[0].groups[0].value.startsWith("data:")))
       ) {
         return [
-          node.open ? print("open") : "",
+          // [prettierx merge update from prettier@2.3.2] cssParenSpacing option support (...)
+          ...(node.open ? [print("open"), parenSpace] : [""]),
           join(",", path.map(print, "groups")),
-          node.close ? print("close") : "",
+          ...(node.close ? [parenSpace, print("close")] : [""]),
         ];
       }
 
@@ -854,7 +891,16 @@ function genericPrint(path, options, print) {
         return group(indent(fill(res)));
       }
 
-      const isSCSSMapItem = isSCSSMapItemNode(path);
+      // prettierx: cssParenSpacing option support (...)
+      if (node.groups.length === 0) {
+        // [prettierx merge update from prettier@2.3.2 ...]
+        return group([
+          node.open ? path.call(print, "open") : "",
+          node.close ? path.call(print, "close") : "",
+        ]);
+      }
+
+      const isSCSSMapItem = isSCSSMapItemNode(path, options);
 
       const lastItem = getLast(node.groups);
       const isLastItemComment = lastItem && lastItem.type === "value-comment";
@@ -864,7 +910,8 @@ function genericPrint(path, options, print) {
         [
           node.open ? print("open") : "",
           indent([
-            softline,
+            // [prettierx merge update from prettier@2.3.2] cssParenSpacing option support (...)
+            parenLine,
             join(
               [",", line],
               path.map((childPath) => {
@@ -892,13 +939,14 @@ function genericPrint(path, options, print) {
           ]),
           ifBreak(
             !isLastItemComment &&
-              isSCSS(options.parser, options.originalText) &&
+              options.parser === "scss" &&
               isSCSSMapItem &&
               shouldPrintComma(options)
               ? ","
               : ""
           ),
-          softline,
+          // prettierx: cssParenSpacing option support (...)
+          parenLine,
           node.close ? print("close") : "",
         ],
         {

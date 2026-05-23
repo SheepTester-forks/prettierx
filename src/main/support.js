@@ -6,8 +6,12 @@ const semver = {
   gte: require("semver/functions/gte"),
 };
 const arrayify = require("../utils/arrayify");
-const currentVersion = require("../../package.json").version;
+// [prettierx] read info from package.json:
+const pkg = require("../../package.json");
 const coreOptions = require("./core-options").options;
+
+// [prettierx] get info from package.json:
+const currentVersion = pkg["prettier-version"];
 
 /**
  * Strings in `plugins` and `pluginSearchDirs` are handled by a wrapped version
