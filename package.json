@@ -2,7 +2,10 @@
   "name": "prettier",
   "version": "3.9.0-dev",
   "description": "Prettier is an opinionated code formatter",
-  "bin": "./bin/prettier.cjs",
+  "bin": {
+    "prettier": "./bin/prettier.cjs",
+    "prettierx": "./bin/prettierx.cjs"
+  },
   "repository": "prettier/prettier",
   "funding": "https://github.com/prettier/prettier?sponsor=1",
   "homepage": "https://prettier.io",
