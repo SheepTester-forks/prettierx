@@ -1,24 +1,16 @@
-"use strict";
-
-const {
-  builders: { indent, join, hardline },
-} = require("../../document");
-const {
+import { hardline, indent, join } from "../../document/index.js";
+import {
   escapeTemplateCharacters,
   printTemplateExpressions,
-} = require("../print/template-literal");
+} from "../print/template-literal.js";
+import { hasLanguageComment } from "./utilities.js";
 
-// [prettierx] with --template-curly-spacing option support (...)
-function format(path, print, textToDoc, options) {
-  const node = path.getValue();
+async function printEmbedGraphQL(textToDoc, print, path, options) {
+  const { node } = path;
 
   const numQuasis = node.quasis.length;
-  if (numQuasis === 1 && node.quasis[0].value.raw.trim() === "") {
-    return "``";
-  }
 
-  // [prettierx] --template-curly-spacing option support (...)
-  const expressionDocs = printTemplateExpressions(path, print, options);
+  const expressionDocs = printTemplateExpressions(path, options, print);
   const parts = [];
 
   for (let i = 0; i < numQuasis; i++) {
@@ -29,7 +21,6 @@ function format(path, print, textToDoc, options) {
 
     const lines = text.split("\n");
     const numLines = lines.length;
-    const expressionDoc = expressionDocs[i];
 
     const startsWithBlankLine =
       numLines > 2 && lines[0].trim() === "" && lines[1].trim() === "";
@@ -39,7 +30,7 @@ function format(path, print, textToDoc, options) {
       lines[numLines - 2].trim() === "";
 
     const commentsAndWhitespaceOnly = lines.every((line) =>
-      /^\s*(?:#[^\n\r]*)?$/.test(line)
+      /^\s*(?:#[^\n\r]*)?$/.test(line),
     );
 
     // Bail out if an interpolation occurs within a comment.
@@ -47,16 +38,12 @@ function format(path, print, textToDoc, options) {
       return null;
     }
 
-    let doc = null;
+    let doc;
 
     if (commentsAndWhitespaceOnly) {
       doc = printGraphqlComments(lines);
     } else {
-      doc = textToDoc(
-        text,
-        { parser: "graphql" },
-        { stripTrailingHardline: true }
-      );
+      doc = await textToDoc(text, { parser: "graphql" });
     }
 
     if (doc) {
@@ -72,8 +59,8 @@ function format(path, print, textToDoc, options) {
       parts.push("");
     }
 
-    if (expressionDoc) {
-      parts.push(expressionDoc);
+    if (!isLast) {
+      parts.push(expressionDocs[i]);
     }
   }
 
@@ -107,4 +94,30 @@ function printGraphqlComments(lines) {
   return parts.length === 0 ? null : join(hardline, parts);
 }
 
-module.exports = format;
+/*
+ * react-relay and graphql-tag
+ * graphql`...`
+ * graphql.experimental`...`
+ * gql`...`
+ * GraphQL comment block
+ *
+ * This intentionally excludes Relay Classic tags, as Prettier does not
+ * support Relay Classic formatting.
+ */
+function isEmbedGraphQL({ node, parent }) {
+  return (
+    hasLanguageComment({ node, parent }, "GraphQL") ||
+    (parent &&
+      ((parent.type === "TaggedTemplateExpression" &&
+        ((parent.tag.type === "MemberExpression" &&
+          parent.tag.object.name === "graphql" &&
+          parent.tag.property.name === "experimental") ||
+          (parent.tag.type === "Identifier" &&
+            (parent.tag.name === "gql" || parent.tag.name === "graphql")))) ||
+        (parent.type === "CallExpression" &&
+          parent.callee.type === "Identifier" &&
+          parent.callee.name === "graphql")))
+  );
+}
+
+export { isEmbedGraphQL, printEmbedGraphQL };

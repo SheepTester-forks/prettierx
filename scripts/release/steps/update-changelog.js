@@ -1,40 +1,24 @@
-"use strict";
+import fs from "node:fs";
+import spawn from "nano-spawn";
+import styleText from "node-style-text";
+import semver from "semver";
+import {
+  getBlogPostInfo,
+  getChangelogContent,
+  logPromise,
+  runYarn,
+  waitForEnter,
+} from "../utilities.js";
 
-const fs = require("fs");
-const execa = require("execa");
-const chalk = require("chalk");
-const { outdent, string: outdentString } = require("outdent");
-const semver = require("semver");
-const { waitForEnter, runYarn, logPromise } = require("../utils");
-
-function getBlogPostInfo(version) {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return {
-    // [prettierx] website is now in x-unsupported/subdirectory
-    file: `x-unsupported/website/blog/${year}-${month}-${day}-${version}.md`,
-    path: `blog/${year}/${month}/${day}/${version}.html`,
-  };
-}
-
-function writeChangelog({ version, previousVersion, body }) {
-  const changelog = fs.readFileSync("CHANGELOG.md", "utf-8");
-  const newEntry = outdent`
-    # ${version}
-
-    [diff](https://github.com/prettier/prettier/compare/${previousVersion}...${version})
-
-    ${body}
-  `;
+function writeChangelog(params) {
+  const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
+  const newEntry = `# ${params.version}\n\n` + getChangelogContent(params);
   fs.writeFileSync("CHANGELOG.md", newEntry + "\n\n" + changelog);
 }
 
 async function getChangelogForPatch({ version, previousVersion }) {
-  const { stdout: changelog } = await execa("node", [
-    "scripts/changelog-for-patch.mjs",
+  const { stdout: changelog } = await spawn(process.execPath, [
+    "scripts/changelog-for-patch.js",
     "--prev-version",
     previousVersion,
     "--new-version",
@@ -43,7 +27,16 @@ async function getChangelogForPatch({ version, previousVersion }) {
   return changelog;
 }
 
-module.exports = async function ({ version, previousVersion }) {
+export default async function updateChangelog({
+  dry,
+  version,
+  previousVersion,
+  next,
+}) {
+  if (dry || next) {
+    return;
+  }
+
   const semverDiff = semver.diff(version, previousVersion);
 
   if (semverDiff !== "patch") {
@@ -58,11 +51,11 @@ module.exports = async function ({ version, previousVersion }) {
       return;
     }
     console.warn(
-      outdentString(chalk`
-        {yellow warning} The file {bold ${blogPost.file}} doesn't exist, but it will be referenced in {bold CHANGELOG.md}. Make sure to create it later.
-
-        Press ENTER to continue.
-      `)
+      `${styleText.yellow("warning")} The file ${styleText.bold(
+        blogPost.file,
+      )} doesn't exist, but it will be referenced in ${styleText.bold(
+        "CHANGELOG.md",
+      )}. Make sure to create it later.`,
     );
   } else {
     const body = await getChangelogForPatch({
@@ -74,12 +67,11 @@ module.exports = async function ({ version, previousVersion }) {
       previousVersion,
       body,
     });
-    console.log("Press ENTER to continue.");
   }
 
   await waitForEnter();
   await logPromise(
     "Re-running Prettier on docs",
-    runYarn(["lint:prettier", "--write"])
+    runYarn(["lint:prettier", "--write"]),
   );
-};
+}
