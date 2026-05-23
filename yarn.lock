@@ -8220,9 +8220,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"prettier@workspace:.":
+"prettierx@workspace:.":
   version: 0.0.0-use.local
-  resolution: "prettier@workspace:."
+  resolution: "prettierx@workspace:."
   dependencies:
     "@angular/compiler": "npm:21.2.13"
     "@babel/code-frame": "npm:8.0.0-rc.5"
@@ -8372,6 +8372,7 @@ __metadata:
     yaml-unist-parser: "npm:2.2.1"
   bin:
     prettier: ./bin/prettier.cjs
+    prettierx: ./bin/prettier.cjs
   languageName: unknown
   linkType: soft
 
