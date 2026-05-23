@@ -1,16 +1,8 @@
-"use strict";
+import commonOptions from "../common/common-options.evaluate.js";
 
-const commonOptions = require("../common/common-options");
-
-// format based on https://github.com/prettier/prettier/blob/main/src/main/core-options.js
-module.exports = {
+// format based on https://github.com/prettier/prettier/blob/main/src/main/core-options.evaluate.js
+const options = {
   singleQuote: commonOptions.singleQuote,
-  // [prettierx]
-  cssParenSpacing: {
-    category: "Other", // CATEGORY_OTHER
-    type: "boolean",
-    default: false,
-    description:
-      "Print spaces between parens in CSS, WordPress style. Status: experimental, with limited testing.",
-  },
 };
+
+export default options;

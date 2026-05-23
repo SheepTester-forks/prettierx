@@ -1,67 +1,97 @@
-"use strict";
-
-const { getNextNonSpaceNonCommentCharacter } = require("../../common/util");
-const { printDanglingComments } = require("../../main/comments");
-const {
-  builders: { line, hardline, softline, group, indent, ifBreak },
-  utils: { removeLines, willBreak },
-} = require("../../document");
-const {
+import { ArgExpansionBailout } from "../../common/errors.js";
+import {
+  group,
+  hardline,
+  indent,
+  line,
+  removeLines,
+  softline,
+  willBreak,
+} from "../../document/index.js";
+import isNonEmptyArray from "../../utilities/is-non-empty-array.js";
+import { hasComment } from "../utilities/comments.js";
+import {
   getFunctionParameters,
-  iterateFunctionParametersPath,
-  isSimpleType,
-  isTestCall,
-  isTypeAnnotationAFunction,
-  isObjectType,
-  isObjectTypePropertyAFunction,
   hasRestParameter,
-  shouldPrintComma,
-  hasComment,
-  isNextLineEmpty,
-} = require("../utils");
-const { locEnd } = require("../loc");
-const { ArgExpansionBailout } = require("../../common/errors");
-const { printFunctionTypeParameters } = require("./misc");
+  iterateFunctionParametersPath,
+} from "../utilities/function-parameters.js";
+import { isFlowObjectTypePropertyAFunction } from "../utilities/is-flow-object-type-property-a-function.js";
+import { isNextLineEmpty } from "../utilities/is-next-line-empty.js";
+import { isSimpleType } from "../utilities/is-simple-type.js";
+import { isTypeAnnotationAFunction } from "../utilities/is-type-annotation-a-function.js";
+import {
+  isArrayExpression,
+  isObjectExpression,
+  isObjectType,
+} from "../utilities/node-types.js";
+import { isTestCall } from "../utilities/test-libraries.js";
+import {
+  printDanglingCommentsInList,
+  printTrailingComma,
+} from "./miscellaneous.js";
 
+/** @import AstPath from "../../common/ast-path.js" */
+
+// `ArrowFunctionExpression` has other dangling comments
+const functionParameterDanglingCommentFilter = (comment) =>
+  comment.mark !== "commentBeforeArrow";
+
+/*
+- `ArrowFunctionExpression`
+- `FunctionDeclaration`
+- `FunctionExpression`
+- `ObjectMethod`
+- `Property`
+- `ObjectProperty`
+- `ClassMethod`
+- `ClassPrivateMethod`
+- `MethodDefinition
+- `TSFunctionType` (TypeScript)
+- `TSCallSignatureDeclaration` (TypeScript)
+- `TSConstructorType` (TypeScript)
+- `TSConstructSignatureDeclaration` (TypeScript)
+- `TSDeclareFunction`(TypeScript)
+- `TSAbstractMethodDefinition` (TypeScript)
+- `TSDeclareMethod` (TypeScript)
+- `TSEmptyBodyFunctionExpression` (TypeScript)
+- `TSMethodSignature` (TypeScript)
+- `FunctionTypeAnnotation` (Flow)
+- `HookDeclaration` (Flow)
+- `HookTypeAnnotation` (Flow)
+- `ComponentDeclaration` (Flow)
+- `DeclareComponent` (Flow)
+- `ComponentTypeAnnotation` (Flow)
+*/
 function printFunctionParameters(
   path,
-  print,
   options,
-  expandArg,
-  printTypeParams
+  print,
+  shouldExpandParameters,
+  shouldPrintTypeParameters,
 ) {
-  const functionNode = path.getValue();
+  const functionNode = path.node;
   const parameters = getFunctionParameters(functionNode);
-  const typeParams = printTypeParams
-    ? printFunctionTypeParameters(path, options, print)
-    : "";
-
-  // [prettierx] --space-in-parens option support (...)
-  const insideSpace = options.spaceInParens ? " " : "";
-  const innerLineBreak = options.spaceInParens ? line : softline;
+  const typeParametersDoc =
+    shouldPrintTypeParameters && functionNode.typeParameters
+      ? print("typeParameters")
+      : "";
 
   if (parameters.length === 0) {
     return [
-      typeParams,
+      typeParametersDoc,
       "(",
-      printDanglingComments(
+      printDanglingCommentsInList(
         path,
         options,
-        /* sameIndent */ true,
-        (comment) =>
-          getNextNonSpaceNonCommentCharacter(
-            options.originalText,
-            comment,
-            locEnd
-          ) === ")"
+        functionParameterDanglingCommentFilter,
       ),
       ")",
     ];
   }
 
-  const parent = path.getParentNode();
+  const { parent } = path;
   const isParametersInTestCall = isTestCall(parent);
-  const shouldHugParameters = shouldHugFunctionParameters(functionNode);
+  const shouldHugParameters = shouldHugTheOnlyFunctionParameter(functionNode);
   const printed = [];
   iterateFunctionParametersPath(path, (parameterPath, index) => {
     const isLastParameter = index === parameters.length - 1;
@@ -92,20 +122,15 @@ function printFunctionParameters(
   //     }                     b,
   //   )                     ) => {
   //                         })
-  if (expandArg) {
-    if (willBreak(typeParams) || willBreak(printed)) {
+  if (shouldExpandParameters && !isDecoratedFunction(path)) {
+    if (willBreak(typeParametersDoc) || willBreak(printed)) {
       // Removing lines in this case leads to broken or ugly output
       throw new ArgExpansionBailout();
     }
-    // [prettierx] with --space-in-parens option support (...)
     return group([
-      removeLines(typeParams),
+      removeLines(typeParametersDoc),
       "(",
-      // [prettierx] --space-in-parens option support (...)
-      insideSpace,
       removeLines(printed),
-      // [prettierx] --space-in-parens option support (...)
-      insideSpace,
       ")",
     ]);
   }
@@ -117,42 +142,23 @@ function printFunctionParameters(
   //   b,
   //   c
   // }) {}
-  const hasNotParameterDecorator = parameters.every((node) => !node.decorators);
+  const hasNotParameterDecorator = parameters.every(
+    (node) => !isNonEmptyArray(node.decorators),
+  );
   if (shouldHugParameters && hasNotParameterDecorator) {
-    // [prettierx] with --space-in-parens option support (...)
-    return [
-      typeParams,
-      "(",
-      // [prettierx] --space-in-parens option support (...)
-      insideSpace,
-      ...printed,
-      // [prettierx] --space-in-parens option support (...)
-      insideSpace,
-      ")",
-    ];
+    return [typeParametersDoc, "(", ...printed, ")"];
   }
 
   // don't break in specs, eg; `it("should maintain parens around done even when long", (done) => {})`
   if (isParametersInTestCall) {
-    // [prettierx] with --space-in-parens option support (...)
-    return [
-      typeParams,
-      "(",
-      // [prettierx] --space-in-parens option support (...)
-      insideSpace,
-      ...printed,
-      // [prettierx] --space-in-parens option support (...)
-      insideSpace,
-      ")",
-    ];
+    return [typeParametersDoc, "(", ...printed, ")"];
   }
 
   const isFlowShorthandWithOneArg =
-    (isObjectTypePropertyAFunction(parent) ||
+    (isFlowObjectTypePropertyAFunction(parent) ||
       isTypeAnnotationAFunction(parent) ||
       parent.type === "TypeAlias" ||
       parent.type === "UnionTypeAnnotation" ||
-      parent.type === "TSUnionType" ||
       parent.type === "IntersectionTypeAnnotation" ||
       (parent.type === "FunctionTypeAnnotation" &&
         parent.returnType === functionNode)) &&
@@ -166,31 +172,30 @@ function printFunctionParameters(
     !functionNode.rest;
 
   if (isFlowShorthandWithOneArg) {
-    if (options.arrowParens === "always") {
-      // [prettierx] --space-in-parens option support (...)
-      return ["(", insideSpace, ...printed, insideSpace, ")"];
+    if (
+      options.arrowParens === "always" ||
+      functionNode.type === "HookTypeAnnotation"
+    ) {
+      return ["(", ...printed, ")"];
     }
     return printed;
   }
 
-  // [prettierx] with --space-in-parens option support (...)
   return [
-    typeParams,
+    typeParametersDoc,
     "(",
-    // [prettierx] --space-in-parens option support (...)
-    indent([innerLineBreak, ...printed]),
-    ifBreak(
-      !hasRestParameter(functionNode) && shouldPrintComma(options, "all")
-        ? ","
-        : ""
-    ),
-    // [prettierx] --space-in-parens option support (...)
-    innerLineBreak,
+    indent([softline, ...printed]),
+    !hasRestParameter(functionNode) &&
+    // Angular does not allow trailing comma
+    path.root.type !== "NGRoot"
+      ? printTrailingComma(options, "all")
+      : "",
+    softline,
     ")",
   ];
 }
 
-function shouldHugFunctionParameters(node) {
+function shouldHugTheOnlyFunctionParameter(node) {
   if (!node) {
     return false;
   }
@@ -209,14 +214,15 @@ function shouldHugFunctionParameters(node) {
           parameter.typeAnnotation.type === "TSTypeAnnotation") &&
         isObjectType(parameter.typeAnnotation.typeAnnotation)) ||
       (parameter.type === "FunctionTypeParam" &&
-        isObjectType(parameter.typeAnnotation)) ||
+        isObjectType(parameter.typeAnnotation) &&
+        parameter !== node.rest) ||
       (parameter.type === "AssignmentPattern" &&
         (parameter.left.type === "ObjectPattern" ||
           parameter.left.type === "ArrayPattern") &&
         (parameter.right.type === "Identifier" ||
-          (parameter.right.type === "ObjectExpression" &&
+          (isObjectExpression(parameter.right) &&
             parameter.right.properties.length === 0) ||
-          (parameter.right.type === "ArrayExpression" &&
+          (isArrayExpression(parameter.right) &&
             parameter.right.elements.length === 0))))
   );
 }
@@ -241,8 +247,7 @@ function shouldGroupFunctionParameters(functionNode, returnTypeDoc) {
     return false;
   }
 
-  const typeParameters =
-    functionNode.typeParameters && functionNode.typeParameters.params;
+  const typeParameters = functionNode.typeParameters?.params;
   if (typeParameters) {
     if (typeParameters.length > 1) {
       return false;
@@ -261,8 +266,77 @@ function shouldGroupFunctionParameters(functionNode, returnTypeDoc) {
   );
 }
 
-module.exports = {
+/**
+ * The "decorated function" pattern.
+ * The arrow function should be kept hugged even if its signature breaks.
+ *
+ * ```
+ * const decoratedFn = decorator(param1, param2)((
+ *   ...
+ * ) => {
+ *   ...
+ * });
+ * ```
+ * @param {AstPath} path
+ */
+function isDecoratedFunction(path) {
+  return path.match(
+    (node) =>
+      node.type === "ArrowFunctionExpression" &&
+      node.body.type === "BlockStatement",
+    (node, name) => {
+      if (
+        node.type === "CallExpression" &&
+        name === "arguments" &&
+        node.arguments.length === 1 &&
+        node.callee.type === "CallExpression"
+      ) {
+        const decorator = node.callee.callee;
+        return (
+          decorator.type === "Identifier" ||
+          (decorator.type === "MemberExpression" &&
+            !decorator.computed &&
+            decorator.object.type === "Identifier" &&
+            decorator.property.type === "Identifier")
+        );
+      }
+      return false;
+    },
+    (node, name) =>
+      (node.type === "VariableDeclarator" && name === "init") ||
+      (node.type === "ExportDefaultDeclaration" && name === "declaration") ||
+      (node.type === "TSExportAssignment" && name === "expression") ||
+      (node.type === "AssignmentExpression" &&
+        name === "right" &&
+        node.left.type === "MemberExpression" &&
+        node.left.object.type === "Identifier" &&
+        node.left.object.name === "module" &&
+        node.left.property.type === "Identifier" &&
+        node.left.property.name === "exports"),
+    (node) =>
+      node.type !== "VariableDeclaration" ||
+      (node.kind === "const" && node.declarations.length === 1),
+  );
+}
+
+function shouldBreakFunctionParameters(functionNode) {
+  const parameters = getFunctionParameters(functionNode);
+  return (
+    parameters.length > 1 &&
+    parameters.some((parameter) => parameter.type === "TSParameterProperty")
+  );
+}
+
+function shouldHugTheOnlyParameter(node, name) {
+  return (
+    (name === "params" || name === "this" || name === "rest") &&
+    shouldHugTheOnlyFunctionParameter(node)
+  );
+}
+
+export {
   printFunctionParameters,
-  shouldHugFunctionParameters,
+  shouldBreakFunctionParameters,
   shouldGroupFunctionParameters,
+  shouldHugTheOnlyParameter,
 };

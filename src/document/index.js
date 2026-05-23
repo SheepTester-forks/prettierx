@@ -1,12 +1,4 @@
-"use strict";
-
-/**
- * @typedef {import("./doc-builders").Doc} Doc
- */
-
-module.exports = {
-  builders: require("./doc-builders"),
-  printer: require("./doc-printer"),
-  utils: require("./doc-utils"),
-  debug: require("./doc-debug"),
-};
+export * from "./builders/index.js";
+export * from "./debug.js";
+export * from "./printer/printer.js";
+export * from "./utilities/index.js";
